@@ -1169,6 +1169,9 @@ export default function Home() {
                 {!liveMode && (
                   <>
                     <div className="text-center">
+                      <span className="mx-auto mb-5 grid h-14 w-14 place-items-center rounded-full bg-[var(--soft)] text-black">
+                        <Icon name="phone" className="h-6 w-6" />
+                      </span>
                       <h2 className="text-3xl font-semibold tracking-[-.03em]">
                         {ui.homeTitle}
                       </h2>
