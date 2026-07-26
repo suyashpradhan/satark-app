@@ -612,7 +612,7 @@ export default function Home() {
           <p className="mx-auto mt-4 max-w-md text-lg leading-7 text-[var(--muted)]">{ui.alertBody}</p>
           <div className="mt-6 border-y border-red-200 py-5">
             <p className="text-sm font-semibold text-[var(--red)]">{ui.alertEvidence}</p>
-            <p className="mx-auto mt-2 max-w-md text-lg font-medium leading-7">“{liveWarning.evidencePhrases?.[0] || liveWarning.warningSignals?.[0] || flow.unknown}”</p>
+            <p className="ph-sensitive mx-auto mt-2 max-w-md text-lg font-medium leading-7">“{liveWarning.evidencePhrases?.[0] || liveWarning.warningSignals?.[0] || flow.unknown}”</p>
           </div>
         </div>
         <div className="mt-auto pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -690,7 +690,7 @@ export default function Home() {
 
               <div className="my-6 border-y border-black/10 py-5" aria-live="polite">
                 <p className="text-sm font-semibold text-[var(--muted)]">{ui.transcript}</p>
-                <p className={`mt-3 min-h-20 whitespace-pre-wrap text-xl leading-8 ${liveTranscript ? "text-black" : "text-[var(--muted)]"}`}>{liveTranscript || ui.waitingTranscript}</p>
+                <p className={`ph-sensitive mt-3 min-h-20 whitespace-pre-wrap text-xl leading-8 ${liveTranscript ? "text-black" : "text-[var(--muted)]"}`}>{liveTranscript || ui.waitingTranscript}</p>
               </div>
 
               {!recording && liveTranscript && <button disabled={processingChunk} onClick={continueFromLive} className="flex min-h-14 w-full items-center justify-center gap-2 rounded-full bg-black px-5 py-4 text-lg font-semibold text-white disabled:opacity-30">{ui.fullCheck} <Icon name="arrow" /></button>}
@@ -735,7 +735,7 @@ export default function Home() {
 
             {result.liveDetection && <div className="mt-7 border-y border-black/10 py-5 text-center">
               <p className="text-sm font-semibold text-[var(--red)]">{flow.why}</p>
-              <p className="mx-auto mt-2 max-w-lg text-lg font-medium leading-7">“{result.assessment.reasonForCall || flow.unknown}”</p>
+              <p className="ph-sensitive mx-auto mt-2 max-w-lg text-lg font-medium leading-7">“{result.assessment.reasonForCall || flow.unknown}”</p>
             </div>}
 
             <List title={ui.doThisNow} items={ui.safeSteps} tone="green" numbered />
@@ -752,6 +752,6 @@ export default function Home() {
   </>);
 }
 
-function Info({ title, body }) { return <div className="py-4"><p className="text-sm font-semibold text-[var(--muted)]">{title}</p><p className="mt-2 whitespace-pre-wrap text-base leading-7">{body || "—"}</p></div>; }
+function Info({ title, body }) { return <div className="py-4"><p className="text-sm font-semibold text-[var(--muted)]">{title}</p><p className="ph-sensitive mt-2 whitespace-pre-wrap text-base leading-7">{body || "—"}</p></div>; }
 function List({ title, items = [], tone, numbered = false }) { return <section className="mt-8"><h3 className={`text-xl font-semibold ${tone === "red" ? "text-[var(--red)]" : "text-black"}`}>{title}</h3><ol className="mt-4 divide-y divide-black/10 border-y border-black/10">{items.map((item, index) => <li key={`${item}-${index}`} className="flex gap-4 py-4 text-base leading-7"><span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-bold ${tone === "red" ? "bg-[var(--red-soft)] text-[var(--red)]" : "bg-black text-white"}`}>{numbered ? index + 1 : "!"}</span><span>{item}</span></li>)}</ol></section>; }
 function Question({ label, value, onChange, answers }) { return <fieldset className="py-5"><legend className="text-base font-semibold leading-6">{label}</legend><div className="mt-3 grid grid-cols-3 gap-2">{answers.map(([option, text]) => <button type="button" key={option} onClick={() => onChange(option)} aria-pressed={value === option} className={`min-h-12 rounded-full px-3 py-3 text-sm font-semibold ${value === option ? "bg-black text-white" : "bg-[var(--soft)] text-black"}`}>{text}</button>)}</div></fieldset>; }
