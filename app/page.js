@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { fallbackAssessment } from "@/lib/safety";
 
 const MAX_SECONDS = 28;
 
@@ -150,9 +151,12 @@ export default function Home() {
       const nextTranscript = `${liveTranscriptRef.current}${liveTranscriptRef.current ? " " : ""}${data.transcript}`.trim();
       liveTranscriptRef.current = nextTranscript;
       setLiveTranscript(nextTranscript);
-      if (data.quickSafety?.riskLevel === "high") {
-        setLiveWarning(data.quickSafety);
-        navigator.vibrate?.([220, 100, 360]);
+      // Scan the complete conversation, not only this 5.5-second API chunk.
+      // This catches requests whose setup and risky action land in different chunks.
+      const cumulativeSafety = fallbackAssessment(nextTranscript);
+      if (cumulativeSafety.riskLevel === "high") {
+        setLiveWarning(cumulativeSafety);
+        triggerCriticalAlert();
         liveActiveRef.current = false;
         streamRef.current?.getTracks().forEach((track) => track.stop());
         stopMicMeter();
@@ -201,6 +205,30 @@ export default function Home() {
     audioContextRef.current?.close();
     audioContextRef.current = null;
     setMicLevel(0);
+  }
+
+  function triggerCriticalAlert() {
+    // Vibration is not implemented by every mobile browser. Use a short tone
+    // as an additional accessible alert, while the full-screen warning remains
+    // the authoritative signal.
+    navigator.vibrate?.([250, 120, 450, 120, 450]);
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      const context = new AudioContextClass();
+      [0, 0.32].forEach((delay) => {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.type = "sine";
+        oscillator.frequency.value = 740;
+        gain.gain.setValueAtTime(0.0001, context.currentTime + delay);
+        gain.gain.exponentialRampToValueAtTime(0.16, context.currentTime + delay + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + delay + 0.22);
+        oscillator.connect(gain).connect(context.destination);
+        oscillator.start(context.currentTime + delay);
+        oscillator.stop(context.currentTime + delay + 0.24);
+      });
+      window.setTimeout(() => context.close(), 900);
+    } catch {}
   }
 
   function recordLiveSegment(stream) {
