@@ -5,6 +5,12 @@ import { fallbackAssessment } from "@/lib/safety";
 
 const MAX_SECONDS = 28;
 
+const FLOW_COPY = {
+  "en-IN": { next: "Show the next step", why: "Why Satark ended this call", unknown: "Satark detected a risky request in this conversation." },
+  "hi-IN": { next: "अगला सुरक्षित कदम देखें", why: "सतर्क ने कॉल क्यों रोकी", unknown: "इस बातचीत में जोखिम भरी माँग मिली।" },
+  "mr-IN": { next: "पुढील सुरक्षित पाऊल पहा", why: "सतर्कने कॉल का थांबवला", unknown: "या संभाषणात धोकादायक मागणी आढळली." },
+};
+
 const UI_COPY = {
   "en-IN": {
     tagline: "Pehle jaanch, phir kadam.",
@@ -500,6 +506,29 @@ export default function Home() {
     setStatus("confirming");
   }
 
+  function finishLiveWarning() {
+    const confirmedLiveTranscript = liveTranscriptRef.current || liveTranscript;
+    const evidence = liveWarning?.evidencePhrases?.[0] || "";
+    const warningSignals = liveWarning?.warningSignals?.length
+      ? liveWarning.warningSignals
+      : [FLOW_COPY[guidanceLanguage]?.unknown || FLOW_COPY["en-IN"].unknown];
+    setResult({
+      liveDetection: true,
+      transcript: confirmedLiveTranscript,
+      assessment: {
+        riskLevel: "high",
+        callerClaim: ui.identityNote,
+        reasonForCall: evidence || warningSignals[0],
+        warningSignals,
+        safeNextSteps: ui.safeSteps,
+        summary: ui.resultHigh,
+      },
+    });
+    setLiveWarning(null);
+    setLiveMode(false);
+    setStatus("done");
+  }
+
   async function transcribe() {
     if (!audio) return;
     setStatus("transcribing");
@@ -571,6 +600,7 @@ export default function Home() {
   const resultTitle = risk === "high" ? ui.resultHigh : risk === "low" ? ui.resultLow : ui.resultCaution;
   const expectedValues = ["none", "bank", "pension", "hospital", "delivery", "insurance"];
   const answers = [["yes", ui.yes], ["no", ui.no], ["unsure", ui.unsure]];
+  const flow = FLOW_COPY[guidanceLanguage] || FLOW_COPY["en-IN"];
 
   return (<>
     {liveWarning && <div className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-[#fff7f6] text-center" role="alertdialog" aria-modal="true" aria-labelledby="live-alert-title">
@@ -580,21 +610,21 @@ export default function Home() {
           <p className="mt-5 text-xs font-bold uppercase tracking-[.14em] text-[var(--red)]">{ui.alertLabel}</p>
           <h2 id="live-alert-title" className="mt-3 text-4xl font-semibold leading-[1.08] tracking-[-.035em]">{ui.alertTitle}</h2>
           <p className="mx-auto mt-4 max-w-md text-lg leading-7 text-[var(--muted)]">{ui.alertBody}</p>
-          {liveWarning.evidencePhrases?.length > 0 && <details className="mt-5 border-y border-red-200 py-3 text-left">
-            <summary className="cursor-pointer text-center font-semibold text-[var(--red)]">{ui.alertEvidence}</summary>
-            <p className="mt-3 text-center text-base leading-7">“{liveWarning.evidencePhrases[0]}”</p>
-          </details>}
+          <div className="mt-6 border-y border-red-200 py-5">
+            <p className="text-sm font-semibold text-[var(--red)]">{ui.alertEvidence}</p>
+            <p className="mx-auto mt-2 max-w-md text-lg font-medium leading-7">“{liveWarning.evidencePhrases?.[0] || liveWarning.warningSignals?.[0] || flow.unknown}”</p>
+          </div>
         </div>
         <div className="mt-auto pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          <button type="button" onClick={continueFromLive} className="flex min-h-14 w-full items-center justify-center rounded-full bg-[var(--red)] px-6 py-4 text-lg font-semibold text-white">{ui.endedCall}</button>
+          <button type="button" onClick={finishLiveWarning} className="flex min-h-14 w-full items-center justify-center gap-2 rounded-full bg-[var(--red)] px-6 py-4 text-lg font-semibold text-white">{flow.next} <Icon name="arrow" /></button>
           {trustedPhone
             ? <a href={`tel:${trustedPhone}`} className="mt-3 flex min-h-14 w-full items-center justify-center gap-2 rounded-full bg-black px-5 py-4 font-semibold text-white"><Icon name="phone" /> {ui.callFamily}</a>
             : <button type="button" disabled className="mt-3 flex min-h-14 w-full items-center justify-center gap-2 rounded-full bg-black px-5 py-4 font-semibold text-white opacity-35"><Icon name="phone" /> {ui.callFamily}</button>}
         </div>
       </div>
     </div>}
-    <main className="mx-auto min-h-screen max-w-xl px-5 py-7 md:py-11" aria-hidden={liveWarning ? "true" : undefined}>
-      <header className="relative mb-10 text-center">
+    <main className="mx-auto min-h-screen max-w-xl px-5 py-7 md:flex md:max-w-2xl md:flex-col md:py-8" aria-hidden={liveWarning ? "true" : undefined}>
+      <header className="relative mb-10 text-center md:mb-4">
         <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-black text-white"><Icon name="shield" className="h-6 w-6" /></span>
         <h1 className="mt-4 text-3xl font-semibold tracking-[-.035em]">Satark</h1>
         <p className="mt-1 text-base font-medium text-[var(--muted)]">{ui.tagline}</p>
@@ -618,8 +648,8 @@ export default function Home() {
         </details>}
       </header>
 
-      <section>
-        <div>
+      <section className={`md:flex md:flex-1 ${!result && !transcript ? "md:items-center" : "md:items-start md:pt-8"}`}>
+        <div className="w-full">
           {!result && !transcript ? <>
             {!liveMode && <><div className="text-center">
               <h2 className="text-3xl font-semibold tracking-[-.03em]">{ui.homeTitle}</h2>
@@ -702,6 +732,11 @@ export default function Home() {
             </div>
 
             <p className="mt-5 text-center text-sm font-semibold text-[var(--muted)]">{ui.identityNote}</p>
+
+            {result.liveDetection && <div className="mt-7 border-y border-black/10 py-5 text-center">
+              <p className="text-sm font-semibold text-[var(--red)]">{flow.why}</p>
+              <p className="mx-auto mt-2 max-w-lg text-lg font-medium leading-7">“{result.assessment.reasonForCall || flow.unknown}”</p>
+            </div>}
 
             <List title={ui.doThisNow} items={ui.safeSteps} tone="green" numbered />
 
