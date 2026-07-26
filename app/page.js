@@ -26,6 +26,10 @@ export default function Home() {
   const [transcript, setTranscript] = useState("");
   const [detectedLanguage, setDetectedLanguage] = useState("");
   const [recording, setRecording] = useState(false);
+  const [liveMode, setLiveMode] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState("");
+  const [liveWarning, setLiveWarning] = useState(null);
+  const [processingChunk, setProcessingChunk] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [audio, setAudio] = useState(null);
   const [audioUrl, setAudioUrl] = useState("");
@@ -33,6 +37,8 @@ export default function Home() {
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
   const recorderRef = useRef(null);
+  const streamRef = useRef(null);
+  const liveActiveRef = useRef(false);
   const chunksRef = useRef([]);
   const fileRef = useRef(null);
 
@@ -49,6 +55,11 @@ export default function Home() {
 
   function setAudioFile(file) {
     if (!file) return;
+    liveActiveRef.current = false;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    setLiveMode(false);
+    setLiveTranscript("");
+    setLiveWarning(null);
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     setAudio(file);
     setAudioUrl(URL.createObjectURL(file));
@@ -79,6 +90,85 @@ export default function Home() {
     } catch {
       setError("Microphone access was unavailable. You can upload a recording instead.");
     }
+  }
+
+  async function sendLiveChunk(blob) {
+    if (!blob.size) return;
+    setProcessingChunk(true);
+    const form = new FormData();
+    form.append("audio", new File([blob], `live-${Date.now()}.webm`, { type: "audio/webm" }));
+    form.append("language", language);
+    try {
+      const response = await fetch("/api/transcribe", { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Live transcription failed");
+      setDetectedLanguage(data.detectedLanguage || language);
+      setLiveTranscript((current) => `${current}${current ? " " : ""}${data.transcript}`.trim());
+      if (data.quickSafety?.riskLevel === "high") {
+        setLiveWarning(data.quickSafety);
+        liveActiveRef.current = false;
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        setRecording(false);
+        setStatus("live-alert");
+      }
+    } catch (err) {
+      setError(err.message || "Live transcription failed. Try the saved-recording option.");
+      liveActiveRef.current = false;
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      setRecording(false);
+      setStatus("idle");
+    } finally {
+      setProcessingChunk(false);
+    }
+  }
+
+  function recordLiveSegment(stream) {
+    if (!liveActiveRef.current || !stream.active) return;
+    const preferred = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+    const recorder = new MediaRecorder(stream, { mimeType: preferred });
+    const chunks = [];
+    recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+    recorder.onstop = async () => {
+      await sendLiveChunk(new Blob(chunks, { type: "audio/webm" }));
+      if (liveActiveRef.current) recordLiveSegment(stream);
+      else stream.getTracks().forEach((track) => track.stop());
+    };
+    recorderRef.current = recorder;
+    recorder.start();
+    window.setTimeout(() => {
+      if (recorder.state === "recording") recorder.stop();
+    }, 5500);
+  }
+
+  async function startLiveCheck() {
+    setError("");
+    setLiveTranscript("");
+    setLiveWarning(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      streamRef.current = stream;
+      liveActiveRef.current = true;
+      setLiveMode(true);
+      setRecording(true);
+      setStatus("live");
+      recordLiveSegment(stream);
+    } catch {
+      setError("माइक्रोफ़ोन शुरू नहीं हुआ। नीचे से सेव रिकॉर्डिंग चुनें।");
+    }
+  }
+
+  function stopLiveCheck() {
+    liveActiveRef.current = false;
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    else streamRef.current?.getTracks().forEach((track) => track.stop());
+    setRecording(false);
+    setStatus("live-stopped");
+  }
+
+  function continueFromLive() {
+    if (!liveTranscript.trim()) return;
+    setTranscript(liveTranscript);
+    setStatus("confirming");
   }
 
   async function transcribe() {
@@ -124,7 +214,9 @@ export default function Home() {
 
   function reset() {
     if (audioUrl) URL.revokeObjectURL(audioUrl);
-    setAudio(null); setAudioUrl(""); setResult(null); setTranscript(""); setDetectedLanguage(""); setError(""); setStatus("idle"); setSeconds(0); setExpectedCall("none"); setSensitiveRequest("unsure"); setPressureUsed("unsure");
+    liveActiveRef.current = false;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    setAudio(null); setAudioUrl(""); setResult(null); setTranscript(""); setDetectedLanguage(""); setLiveMode(false); setLiveTranscript(""); setLiveWarning(null); setError(""); setStatus("idle"); setSeconds(0); setExpectedCall("none"); setSensitiveRequest("unsure"); setPressureUsed("unsure");
     if (fileRef.current) fileRef.current.value = "";
   }
 
@@ -154,8 +246,8 @@ export default function Home() {
         <div>
           {!result && !transcript ? <>
             <div className="text-center">
-              <h2 className="text-3xl font-semibold tracking-[-.025em]">कॉल की जाँच करें</h2>
-              <p className="mx-auto mt-3 max-w-sm text-lg leading-7 text-[var(--muted)]">संदिग्ध कॉल की रिकॉर्डिंग सुनाएँ। हम बताएँगे कि आगे क्या करना सुरक्षित है।</p>
+              <h2 className="text-3xl font-semibold tracking-[-.025em]">लाइव कॉल की जाँच करें</h2>
+              <p className="mx-auto mt-3 max-w-sm text-lg leading-7 text-[var(--muted)]">फ़ोन को स्पीकर पर रखें। Satark बातचीत सुनकर जोखिम भरी माँग पर तुरंत रोकेगा।</p>
             </div>
 
             <div className="mt-10 divide-y divide-black/10 border-y border-black/10">
@@ -163,21 +255,39 @@ export default function Home() {
             </div>
 
             <div className="mt-9">
-              <button onClick={recording ? () => recorderRef.current?.stop() : startRecording} className={`flex w-full min-h-20 items-center justify-center gap-3 rounded-full px-6 text-lg font-semibold transition ${recording ? "recording-pulse bg-[var(--red)] text-white" : "bg-black text-white hover:bg-neutral-800"}`}>
+              <button onClick={recording && liveMode ? stopLiveCheck : startLiveCheck} className={`flex w-full min-h-20 items-center justify-center gap-3 rounded-full px-6 text-lg font-semibold transition ${recording && liveMode ? "recording-pulse bg-[var(--red)] text-white" : "bg-black text-white hover:bg-neutral-800"}`}>
                 <Icon name={recording ? "stop" : "mic"} className="h-6 w-6" />
-                {recording ? `रिकॉर्डिंग रोकें · ${seconds}s` : "अभी रिकॉर्ड करें"}
+                {recording && liveMode ? "लाइव जाँच रोकें" : "लाइव जाँच शुरू करें"}
               </button>
-              <button onClick={() => fileRef.current?.click()} className="mx-auto mt-5 flex items-center justify-center gap-2 px-4 py-2 font-semibold text-[var(--muted)] hover:text-black">
-                <Icon name="upload" className="h-5 w-5" /> फोन से रिकॉर्डिंग चुनें
+              <button disabled={recording && liveMode} onClick={() => fileRef.current?.click()} className="mx-auto mt-5 flex items-center justify-center gap-2 px-4 py-2 font-semibold text-[var(--muted)] hover:text-black disabled:opacity-30">
+                <Icon name="upload" className="h-5 w-5" /> या सेव रिकॉर्डिंग चुनें
               </button>
               <input ref={fileRef} className="hidden" type="file" accept="audio/*,.webm,.m4a" onChange={(e) => setAudioFile(e.target.files?.[0])} />
             </div>
 
-            {audio && <div className="mt-7 border-y border-black/10 py-5"><div className="mb-3 flex items-center justify-between gap-3"><p className="truncate text-sm font-semibold">रिकॉर्डिंग तैयार है</p><button onClick={reset} className="text-sm font-semibold text-[var(--muted)]">हटाएँ</button></div><audio className="w-full" src={audioUrl} controls /></div>}
+            {liveMode && <section className="mt-8" aria-live="polite">
+              {liveWarning ? <div className="border-y-2 border-[var(--red)] py-6 text-center">
+                <p className="text-sm font-bold uppercase tracking-[.15em] text-[var(--red)]">जोखिम भरी माँग मिली</p>
+                <p className="mt-3 text-3xl font-semibold leading-tight">रुकिए। कोई OTP, PIN या पैसा साझा न करें।</p>
+                <p className="mt-3 text-base leading-7 text-[var(--muted)]">कॉल काटें और संस्था के आधिकारिक नंबर से खुद जाँच करें।</p>
+              </div> : <div className="flex items-center justify-center gap-3 border-y border-black/10 py-5">
+                <span className={`h-3 w-3 rounded-full ${recording ? "bg-[var(--red)] recording-pulse" : "bg-black/25"}`} />
+                <p className="font-semibold">{recording ? "Satark सुन रहा है…" : processingChunk ? "आखिरी हिस्सा पढ़ा जा रहा है…" : "लाइव जाँच रुकी हुई है"}</p>
+              </div>}
+
+              <div className="py-6">
+                <p className="text-sm font-semibold text-[var(--muted)]">लाइव बातचीत</p>
+                <p className="mt-3 min-h-20 text-xl leading-8">{liveTranscript || "पहले शब्द कुछ सेकंड में यहाँ दिखाई देंगे…"}</p>
+              </div>
+
+              {!recording && liveTranscript && <button disabled={processingChunk} onClick={continueFromLive} className="flex w-full items-center justify-center gap-2 rounded-full bg-black px-5 py-5 text-lg font-semibold text-white disabled:opacity-30">पूरी जाँच देखें <Icon name="arrow" /></button>}
+            </section>}
+
+            {audio && !liveMode && <div className="mt-7 border-y border-black/10 py-5"><div className="mb-3 flex items-center justify-between gap-3"><p className="truncate text-sm font-semibold">रिकॉर्डिंग तैयार है</p><button onClick={reset} className="text-sm font-semibold text-[var(--muted)]">हटाएँ</button></div><audio className="w-full" src={audioUrl} controls /></div>}
             {error && <p role="alert" className="mt-5 border-l-4 border-[var(--red)] py-2 pl-4 text-sm leading-6 text-[var(--red)]">{error}</p>}
-            <button disabled={!audio || status === "transcribing"} onClick={transcribe} className="mt-7 flex w-full items-center justify-center gap-2 rounded-full bg-black px-5 py-5 text-lg font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-25">
+            {audio && !liveMode && <button disabled={status === "transcribing"} onClick={transcribe} className="mt-7 flex w-full items-center justify-center gap-2 rounded-full bg-black px-5 py-5 text-lg font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-25">
               {status === "transcribing" ? "कॉल सुनी जा रही है…" : <>आगे बढ़ें <Icon name="arrow" /></>}
-            </button>
+            </button>}
             <p className="mx-auto mt-5 max-w-sm text-center text-sm leading-6 text-[var(--muted)]">कॉलर की पहचान साबित नहीं होती। OTP, PIN, CVV या पासवर्ड कभी साझा न करें।</p>
           </> : !result ? <>
             <div className="text-center">

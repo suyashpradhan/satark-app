@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { fallbackAssessment } from "@/lib/safety";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -61,6 +62,7 @@ export async function POST(request) {
       transcript,
       detectedLanguage: data.language_code || language,
       languageProbability: data.language_probability ?? null,
+      quickSafety: fallbackAssessment(transcript),
     });
   } catch (error) {
     const timedOut = error?.name === "TimeoutError";

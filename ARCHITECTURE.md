@@ -17,6 +17,8 @@ The current golden path is:
 7. Show a safety result and independently verifiable next steps.
 8. Share the result with a trusted family member.
 
+The demo also includes a near-live path: the browser records independent 5.5-second segments, transcribes each through the same server endpoint, appends the text, and applies deterministic critical-risk rules. A critical request stops monitoring immediately. This deliberately avoids exposing the API key through a browser-to-Sarvam WebSocket.
+
 ## 2. High-level architecture
 
 ```text
@@ -57,6 +59,19 @@ The Sarvam API key exists only in the server environment. The browser never rece
 3. Recording stops manually or after 28 seconds.
 4. The browser creates an in-memory `File` and a temporary object URL for playback.
 5. No request is sent until the user presses **Continue**.
+
+### Live Check
+
+1. The browser opens one microphone stream after permission.
+2. It records an independent 5.5-second WebM segment with `MediaRecorder`.
+3. Each completed segment is sent to `POST /api/transcribe`.
+4. The next segment begins only after the previous request completes, preventing overlapping API calls.
+5. Returned text is appended to the live transcript.
+6. The server also returns deterministic `quickSafety` signals.
+7. A critical signal ends microphone capture and displays the stop warning.
+8. The accumulated transcript can continue into the confirmation and full-analysis flow.
+
+This is “near-live” because results arrive once per segment plus network latency. Production realtime work can replace it with a server-side Saaras WebSocket proxy after latency and deployment support are verified.
 
 ### Choose recording
 
@@ -116,7 +131,11 @@ Success response:
 {
   "transcript": "…",
   "detectedLanguage": "hi-IN",
-  "languageProbability": 0.96
+  "languageProbability": 0.96,
+  "quickSafety": {
+    "riskLevel": "high",
+    "warningSignals": ["Possible request for sensitive information or money"]
+  }
 }
 ```
 
@@ -288,4 +307,3 @@ README.md                       # Local setup
 5. Add short Hindi/Marathi read-aloud output.
 6. Add an evaluation harness using consented labeled recordings.
 7. Consider streaming Saaras only after the post-call golden path is reliable.
-
