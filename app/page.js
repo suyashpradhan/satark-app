@@ -25,6 +25,8 @@ function Icon({ name, className = "h-5 w-5" }) {
     arrow: <><path d="M5 12h14M13 6l6 6-6 6"/></>,
     refresh: <><path d="M20 12a8 8 0 1 1-2.3-5.7L20 8M20 3v5h-5"/></>,
     share: <><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></>,
+    volume: <><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/></>,
+    phone: <><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2.1Z"/></>,
   };
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -49,6 +51,9 @@ export default function Home() {
   const [status, setStatus] = useState("idle");
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  const [trustedPhone, setTrustedPhone] = useState("");
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [phoneSaved, setPhoneSaved] = useState(false);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const liveActiveRef = useRef(false);
@@ -61,6 +66,8 @@ export default function Home() {
   const fileRef = useRef(null);
   const warningTriggeredRef = useRef(false);
   const liveSessionRef = useRef(0);
+  const warningAudioRef = useRef(null);
+  const warningAudioUrlRef = useRef("");
 
   useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
 
@@ -69,6 +76,14 @@ export default function Home() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     if (meterFrameRef.current) cancelAnimationFrame(meterFrameRef.current);
     audioContextRef.current?.close();
+    warningAudioRef.current?.pause();
+    if (warningAudioUrlRef.current) URL.revokeObjectURL(warningAudioUrlRef.current);
+  }, []);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem("satark-trusted-phone") || "";
+    setTrustedPhone(saved);
+    setPhoneDraft(saved);
   }, []);
 
   useEffect(() => {
@@ -189,6 +204,52 @@ export default function Home() {
     stopMicMeter();
     setRecording(false);
     setStatus("live-alert");
+    window.setTimeout(() => playSpokenWarning(), 650);
+  }
+
+  async function playSpokenWarning() {
+    warningAudioRef.current?.pause();
+    try {
+      const response = await fetch("/api/speak-warning", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ language: language === "mr-IN" ? "mr-IN" : "hi-IN" }),
+      });
+      if (!response.ok) throw new Error("speech unavailable");
+      const blob = await response.blob();
+      if (warningAudioUrlRef.current) URL.revokeObjectURL(warningAudioUrlRef.current);
+      const url = URL.createObjectURL(blob);
+      warningAudioUrlRef.current = url;
+      const player = new Audio(url);
+      warningAudioRef.current = player;
+      await player.play();
+    } catch {
+      const message = language === "mr-IN"
+        ? "थांबा. कॉल बंद करा. कोणतीही माहिती किंवा पैसे देऊ नका."
+        : "रुकिए। कॉल काट दीजिए। कोई जानकारी या पैसा साझा न करें।";
+      window.speechSynthesis?.cancel();
+      if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
+        const utterance = new SpeechSynthesisUtterance(message);
+        utterance.lang = language === "mr-IN" ? "mr-IN" : "hi-IN";
+        utterance.rate = 0.88;
+        window.speechSynthesis.speak(utterance);
+      }
+    }
+  }
+
+  function saveTrustedPhone() {
+    const normalized = phoneDraft.replace(/[^\d+]/g, "");
+    const digits = normalized.replace(/\D/g, "");
+    if (digits.length < 10 || digits.length > 13) {
+      setError("कृपया सही फ़ोन नंबर लिखें।");
+      setPhoneSaved(false);
+      return;
+    }
+    window.localStorage.setItem("satark-trusted-phone", normalized);
+    setTrustedPhone(normalized);
+    setPhoneDraft(normalized);
+    setPhoneSaved(true);
+    setError("");
   }
 
   async function checkSemanticRisk(currentTranscript, sessionId) {
@@ -291,6 +352,8 @@ export default function Home() {
     liveTranscriptRef.current = "";
     setLiveWarning(null);
     warningTriggeredRef.current = false;
+    warningAudioRef.current?.pause();
+    window.speechSynthesis?.cancel();
     setNoSpeech(false);
     emptySegmentsRef.current = 0;
     try {
@@ -380,6 +443,8 @@ export default function Home() {
     liveSessionRef.current += 1;
     liveTranscriptRef.current = "";
     warningTriggeredRef.current = false;
+    warningAudioRef.current?.pause();
+    window.speechSynthesis?.cancel();
     setAudio(null); setAudioUrl(""); setResult(null); setTranscript(""); setDetectedLanguage(""); setLiveMode(false); setLiveTranscript(""); setLiveWarning(null); setNoSpeech(false); setError(""); setStatus("idle"); setSeconds(0); setExpectedCall("none"); setSensitiveRequest("unsure"); setPressureUsed("unsure");
     if (fileRef.current) fileRef.current.value = "";
   }
@@ -409,6 +474,10 @@ export default function Home() {
       </div>
       <div className="mx-auto w-full max-w-lg">
         <button onClick={continueFromLive} className="w-full rounded-full bg-[var(--red)] px-6 py-5 text-lg font-semibold text-white">कॉल काट दी — पूरी जाँच देखें</button>
+        <div className={`mt-3 grid gap-3 ${trustedPhone ? "grid-cols-2" : "grid-cols-1"}`}>
+          <button onClick={playSpokenWarning} className="flex items-center justify-center gap-2 rounded-full border border-black/15 bg-white px-4 py-4 font-semibold"><Icon name="volume" /> फिर से सुनें</button>
+          {trustedPhone && <a href={`tel:${trustedPhone}`} className="flex items-center justify-center gap-2 rounded-full bg-black px-4 py-4 font-semibold text-white"><Icon name="phone" /> परिवार को कॉल</a>}
+        </div>
         <button onClick={reset} className="mt-3 w-full px-5 py-3 font-semibold text-[var(--muted)]">नई जाँच शुरू करें</button>
       </div>
     </div>}
@@ -429,6 +498,16 @@ export default function Home() {
 
             <div className="mt-10 divide-y divide-black/10 border-y border-black/10">
               <label className="flex items-center justify-between gap-4 py-4 text-base font-medium"><span>भाषा</span><select aria-label="बातचीत की भाषा" value={language} onChange={(e) => setLanguage(e.target.value)} className="max-w-[55%] bg-transparent py-2 text-right text-base text-[var(--muted)]"><option value="unknown">अपने आप पहचानें</option><option value="hi-IN">हिंदी</option><option value="mr-IN">मराठी</option></select></label>
+              <details className="py-4">
+                <summary className="cursor-pointer text-base font-medium">परिवार की मदद सेट करें</summary>
+                <div className="mt-4 flex gap-2">
+                  <label className="sr-only" htmlFor="trusted-phone">भरोसेमंद व्यक्ति का फ़ोन नंबर</label>
+                  <input id="trusted-phone" inputMode="tel" autoComplete="tel" value={phoneDraft} onChange={(event) => { setPhoneDraft(event.target.value); setPhoneSaved(false); }} placeholder="फ़ोन नंबर" className="min-w-0 flex-1 rounded-full border border-black/15 bg-white px-5 py-3 outline-none focus:border-black" />
+                  <button type="button" onClick={saveTrustedPhone} className="rounded-full bg-black px-5 py-3 font-semibold text-white">सहेजें</button>
+                </div>
+                <p className="mt-2 text-sm text-[var(--muted)]">नंबर केवल इसी फ़ोन पर सुरक्षित रहेगा।</p>
+                {phoneSaved && <p className="mt-2 text-sm font-semibold text-[#087a54]" role="status">नंबर सहेज दिया गया।</p>}
+              </details>
             </div>
 
             <div className="mt-9">
@@ -517,6 +596,7 @@ export default function Home() {
 
             <details className="mt-7 border-y border-black/10 py-4"><summary className="cursor-pointer font-semibold">पूरी बातचीत पढ़ें</summary><p className="mt-3 whitespace-pre-wrap text-base leading-7 text-[var(--muted)]">{result.transcript}</p></details>
             <button onClick={shareResult} className="mt-8 flex w-full items-center justify-center gap-2 rounded-full bg-black px-5 py-5 text-lg font-semibold text-white"><Icon name="share" /> परिवार को भेजें</button>
+            {trustedPhone && <a href={`tel:${trustedPhone}`} className="mt-3 flex w-full items-center justify-center gap-2 rounded-full border border-black/15 bg-white px-5 py-5 text-lg font-semibold"><Icon name="phone" /> परिवार को कॉल करें</a>}
             <button onClick={reset} className="mx-auto mt-4 flex items-center justify-center gap-2 px-5 py-3 font-semibold text-[var(--muted)]"><Icon name="refresh" /> दूसरी कॉल जाँचें</button>
           </>}
         </div>

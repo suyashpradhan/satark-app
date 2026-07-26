@@ -173,6 +173,17 @@ Request:
 
 The success response contains the confirmed inputs and a structured `assessment` with risk level, caller claim, stated reason, requests, warning signals, items not to share, safe next steps, summary, analysis mode, and fixed verification status.
 
+### `POST /api/speak-warning`
+
+Accepts only the selected supported language (`hi-IN` or `mr-IN`). The warning
+text is fixed on the server to prevent the public endpoint from becoming an
+arbitrary speech generator. It calls Sarvam Bulbul v3 and returns WAV audio. If
+network speech cannot play, the browser attempts its built-in speech engine.
+
+The optional trusted-family phone number is stored only in browser
+`localStorage`; it is never sent to Satark or Sarvam. The emergency action uses
+the device's `tel:` handler and still requires the user to place the call.
+
 ## 5. Data and storage
 
 ### Currently stored
