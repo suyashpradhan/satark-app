@@ -68,8 +68,10 @@ The Sarvam API key exists only in the server environment. The browser never rece
 4. The next segment begins only after the previous request completes, preventing overlapping API calls.
 5. Returned text is appended to the live transcript.
 6. The server also returns deterministic `quickSafety` signals.
-7. A critical signal ends microphone capture and displays the stop warning.
-8. The accumulated transcript can continue into the confirmation and full-analysis flow.
+7. The client uses the Web Audio API only for a local microphone-level meter; raw samples are not retained by the meter.
+8. A critical signal vibrates supported devices, ends microphone capture, quotes the detected evidence phrase, and displays a full-screen stop warning.
+9. Two consecutive segments with no detectable speech stop the session and offer a guided retry.
+10. The accumulated transcript can continue into the confirmation and full-analysis flow.
 
 This is “near-live” because results arrive once per segment plus network latency. Production realtime work can replace it with a server-side Saaras WebSocket proxy after latency and deployment support are verified.
 

@@ -30,6 +30,8 @@ export default function Home() {
   const [liveTranscript, setLiveTranscript] = useState("");
   const [liveWarning, setLiveWarning] = useState(null);
   const [processingChunk, setProcessingChunk] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
+  const [noSpeech, setNoSpeech] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [audio, setAudio] = useState(null);
   const [audioUrl, setAudioUrl] = useState("");
@@ -40,10 +42,20 @@ export default function Home() {
   const streamRef = useRef(null);
   const liveActiveRef = useRef(false);
   const liveRequestsRef = useRef(0);
+  const emptySegmentsRef = useRef(0);
+  const audioContextRef = useRef(null);
+  const meterFrameRef = useRef(null);
   const chunksRef = useRef([]);
   const fileRef = useRef(null);
 
   useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
+
+  useEffect(() => () => {
+    liveActiveRef.current = false;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    if (meterFrameRef.current) cancelAnimationFrame(meterFrameRef.current);
+    audioContextRef.current?.close();
+  }, []);
 
   useEffect(() => {
     if (!recording) return;
@@ -103,13 +115,29 @@ export default function Home() {
     try {
       const response = await fetch("/api/transcribe", { method: "POST", body: form });
       const data = await response.json();
+      if (response.status === 422) {
+        emptySegmentsRef.current += 1;
+        if (emptySegmentsRef.current >= 2) {
+          setNoSpeech(true);
+          liveActiveRef.current = false;
+          streamRef.current?.getTracks().forEach((track) => track.stop());
+          stopMicMeter();
+          setRecording(false);
+          setStatus("no-speech");
+        }
+        return;
+      }
       if (!response.ok) throw new Error(data.error || "Live transcription failed");
+      emptySegmentsRef.current = 0;
+      setNoSpeech(false);
       setDetectedLanguage(data.detectedLanguage || language);
       setLiveTranscript((current) => `${current}${current ? " " : ""}${data.transcript}`.trim());
       if (data.quickSafety?.riskLevel === "high") {
         setLiveWarning(data.quickSafety);
+        navigator.vibrate?.([220, 100, 360]);
         liveActiveRef.current = false;
         streamRef.current?.getTracks().forEach((track) => track.stop());
+        stopMicMeter();
         setRecording(false);
         setStatus("live-alert");
       }
@@ -117,12 +145,44 @@ export default function Home() {
       setError(err.message || "Live transcription failed. Try the saved-recording option.");
       liveActiveRef.current = false;
       streamRef.current?.getTracks().forEach((track) => track.stop());
+      stopMicMeter();
       setRecording(false);
       setStatus("idle");
     } finally {
       liveRequestsRef.current = Math.max(0, liveRequestsRef.current - 1);
       setProcessingChunk(liveRequestsRef.current > 0);
     }
+  }
+
+  function startMicMeter(stream) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    const context = new AudioContextClass();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 256;
+    context.createMediaStreamSource(stream).connect(analyser);
+    const samples = new Uint8Array(analyser.fftSize);
+    let frames = 0;
+    audioContextRef.current = context;
+    const measure = () => {
+      analyser.getByteTimeDomainData(samples);
+      let sum = 0;
+      for (const sample of samples) {
+        const normalized = (sample - 128) / 128;
+        sum += normalized * normalized;
+      }
+      if (frames++ % 5 === 0) setMicLevel(Math.min(100, Math.round(Math.sqrt(sum / samples.length) * 420)));
+      if (liveActiveRef.current) meterFrameRef.current = requestAnimationFrame(measure);
+    };
+    measure();
+  }
+
+  function stopMicMeter() {
+    if (meterFrameRef.current) cancelAnimationFrame(meterFrameRef.current);
+    meterFrameRef.current = null;
+    audioContextRef.current?.close();
+    audioContextRef.current = null;
+    setMicLevel(0);
   }
 
   function recordLiveSegment(stream) {
@@ -150,6 +210,8 @@ export default function Home() {
     setError("");
     setLiveTranscript("");
     setLiveWarning(null);
+    setNoSpeech(false);
+    emptySegmentsRef.current = 0;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       streamRef.current = stream;
@@ -157,6 +219,7 @@ export default function Home() {
       setLiveMode(true);
       setRecording(true);
       setStatus("live");
+      startMicMeter(stream);
       recordLiveSegment(stream);
     } catch {
       setError("माइक्रोफ़ोन शुरू नहीं हुआ। नीचे से सेव रिकॉर्डिंग चुनें।");
@@ -168,6 +231,7 @@ export default function Home() {
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
     else streamRef.current?.getTracks().forEach((track) => track.stop());
     setRecording(false);
+    stopMicMeter();
     setStatus("live-stopped");
   }
 
@@ -222,7 +286,8 @@ export default function Home() {
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     liveActiveRef.current = false;
     streamRef.current?.getTracks().forEach((track) => track.stop());
-    setAudio(null); setAudioUrl(""); setResult(null); setTranscript(""); setDetectedLanguage(""); setLiveMode(false); setLiveTranscript(""); setLiveWarning(null); setError(""); setStatus("idle"); setSeconds(0); setExpectedCall("none"); setSensitiveRequest("unsure"); setPressureUsed("unsure");
+    stopMicMeter();
+    setAudio(null); setAudioUrl(""); setResult(null); setTranscript(""); setDetectedLanguage(""); setLiveMode(false); setLiveTranscript(""); setLiveWarning(null); setNoSpeech(false); setError(""); setStatus("idle"); setSeconds(0); setExpectedCall("none"); setSensitiveRequest("unsure"); setPressureUsed("unsure");
     if (fileRef.current) fileRef.current.value = "";
   }
 
@@ -240,7 +305,20 @@ export default function Home() {
     ? "text-[var(--red)]"
     : risk === "low" ? "text-[#087a54]" : "text-[var(--amber)]";
 
-  return (
+  return (<>
+    {liveWarning && <div className="fixed inset-0 z-50 flex min-h-screen flex-col bg-[#fff7f6] px-6 py-8 text-center" role="alertdialog" aria-modal="true">
+      <div className="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center">
+        <span className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-[var(--red)] text-white"><Icon name="alert" className="h-10 w-10" /></span>
+        <p className="mt-7 text-sm font-bold uppercase tracking-[.18em] text-[var(--red)]">जोखिम भरी माँग मिली</p>
+        <h2 className="mt-4 text-4xl font-semibold leading-tight tracking-[-.03em]">रुकिए। कुछ साझा न करें।</h2>
+        {liveWarning.evidencePhrases?.[0] && <blockquote className="mt-7 border-y border-red-200 py-5 text-xl font-medium leading-8">“{liveWarning.evidencePhrases[0]}”</blockquote>}
+        <p className="mx-auto mt-6 max-w-md text-lg leading-8 text-[var(--muted)]">कॉल काटें। OTP, PIN या पैसा साझा न करें। संस्था के आधिकारिक नंबर से खुद जाँच करें।</p>
+      </div>
+      <div className="mx-auto w-full max-w-lg">
+        <button onClick={continueFromLive} className="w-full rounded-full bg-[var(--red)] px-6 py-5 text-lg font-semibold text-white">कॉल काट दी — पूरी जाँच देखें</button>
+        <button onClick={reset} className="mt-3 w-full px-5 py-3 font-semibold text-[var(--muted)]">नई जाँच शुरू करें</button>
+      </div>
+    </div>}
     <main className="mx-auto min-h-screen max-w-xl px-5 py-8 md:py-12">
       <header className="mb-12 text-center">
         <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-black text-white"><Icon name="shield" className="h-6 w-6" /></span>
@@ -276,9 +354,18 @@ export default function Home() {
                 <p className="text-sm font-bold uppercase tracking-[.15em] text-[var(--red)]">जोखिम भरी माँग मिली</p>
                 <p className="mt-3 text-3xl font-semibold leading-tight">रुकिए। कोई OTP, PIN या पैसा साझा न करें।</p>
                 <p className="mt-3 text-base leading-7 text-[var(--muted)]">कॉल काटें और संस्था के आधिकारिक नंबर से खुद जाँच करें।</p>
+              </div> : noSpeech ? <div className="border-y border-black/15 py-6 text-center">
+                <p className="text-2xl font-semibold">आवाज़ साफ़ नहीं मिली</p>
+                <p className="mt-3 text-base leading-7 text-[var(--muted)]">स्पीकर चालू करें, फ़ोन पास रखें और फिर से कोशिश करें।</p>
+                <button onClick={startLiveCheck} className="mt-5 rounded-full bg-black px-6 py-3 font-semibold text-white">फिर से सुनें</button>
               </div> : <div className="flex items-center justify-center gap-3 border-y border-black/10 py-5">
                 <span className={`h-3 w-3 rounded-full ${recording ? "bg-[var(--red)] recording-pulse" : "bg-black/25"}`} />
                 <p className="font-semibold">{recording ? "Satark सुन रहा है…" : processingChunk ? "आखिरी हिस्सा पढ़ा जा रहा है…" : "लाइव जाँच रुकी हुई है"}</p>
+              </div>}
+
+              {recording && <div className="mt-5" aria-label={`Microphone level ${micLevel} percent`}>
+                <div className="h-2 overflow-hidden rounded-full bg-black/10"><div className="h-full rounded-full bg-black transition-[width] duration-100" style={{ width: `${Math.max(3, micLevel)}%` }} /></div>
+                <div className="mt-2 flex justify-between text-xs font-medium text-[var(--muted)]"><span>{micLevel > 8 ? "आवाज़ आ रही है" : "थोड़ा पास बोलें"}</span><span>माइक्रोफ़ोन</span></div>
               </div>}
 
               <div className="py-6">
@@ -342,7 +429,7 @@ export default function Home() {
         </div>
       </section>
     </main>
-  );
+  </>);
 }
 
 function Info({ title, body }) { return <div className="py-5"><p className="text-sm font-semibold text-[var(--muted)]">{title}</p><p className="mt-2 text-lg font-medium leading-7">{body || "स्पष्ट नहीं कहा गया"}</p></div>; }
