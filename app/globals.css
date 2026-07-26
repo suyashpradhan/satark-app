@@ -20,14 +20,19 @@ body {
   min-height: 100vh;
   color: var(--ink);
   background: var(--paper);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Noto Sans Devanagari", "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-button, input, select { font: inherit; }
-button:focus-visible, input:focus-visible, select:focus-visible {
+button, input, select, textarea { font: inherit; }
+button, a, summary {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible, summary:focus-visible {
   outline: 3px solid rgba(0, 122, 255, .35);
   outline-offset: 3px;
 }

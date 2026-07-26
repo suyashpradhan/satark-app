@@ -22,3 +22,19 @@ test("a normal family call does not trigger the red warning", () => {
   assert.equal(result.riskLevel, "caution");
   assert.equal(result.evidencePhrases.length, 0);
 });
+
+test("an amount by itself does not trigger the red warning", () => {
+  const examples = [
+    "आपके खाते में पचास हजार रुपये हैं।",
+    "Your refund amount is 50K.",
+    "आपकी पॉलिसी की कीमत ₹50,000 है।",
+  ];
+  for (const transcript of examples) {
+    assert.notEqual(fallbackAssessment(transcript).riskLevel, "high", transcript);
+  }
+});
+
+test("an amount paired with a payment action still triggers the red warning", () => {
+  const result = fallbackAssessment("पचास हजार का रिफंड मिलेगा। पहले ₹499 अभी भेज दीजिए।");
+  assert.equal(result.riskLevel, "high");
+});

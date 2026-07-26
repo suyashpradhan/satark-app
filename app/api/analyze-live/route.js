@@ -54,7 +54,9 @@ export async function POST(request) {
 
 Return HIGH when the caller asks or maneuvers the listener toward any sensitive disclosure or action: credentials/codes; identity, banking, pension, insurance or medical documents; money, fees, QR/UPI/transfer; installing an app or granting device access; moving to WhatsApp/a link; or an in-person collection that has not been independently arranged. Also return HIGH for impersonation combined with urgency, secrecy, fear, reward, authority, account/pension/benefit threats, or instructions that evade normal official channels. A caller can distribute these elements across the conversation.
 
-Return CAUTION for a suspicious or ambiguous institutional claim without a sensitive action yet. Return LOW only for ordinary conversation with no observable manipulation or sensitive request. Never authenticate the caller and never declare the call genuine or definitively fraudulent. Evidence must be a short exact quote from the transcript, not an invented phrase. Reason must be one short Hindi sentence.`,
+Return CAUTION for a suspicious or ambiguous institutional claim without a sensitive action yet. Return LOW only for ordinary conversation with no observable manipulation or sensitive request. Never authenticate the caller and never declare the call genuine or definitively fraudulent. Evidence must be a short exact quote from the transcript, not an invented phrase. Reason must be one short Hindi sentence.
+
+An amount, refund, balance, prize, benefit or account value mentioned by itself is NOT a sensitive action and must never be HIGH. It becomes HIGH only when paired with an observable request or maneuver to pay, transfer, scan, disclose, install, click, share, or hand over something sensitive. Do not infer a missing request.`,
           },
           {
             role: "user",

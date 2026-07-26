@@ -30,7 +30,11 @@ export async function POST(request) {
     const transcript =
       typeof input.transcript === "string" ? input.transcript.trim() : "";
     const language = typeof input.language === "string" ? input.language : "unknown";
-    const outputLanguage = language === "mr-IN" ? "Marathi" : "Hindi";
+    const outputLanguage = language === "mr-IN"
+      ? "Marathi"
+      : language === "hi-IN"
+        ? "Hindi"
+        : "English";
     const expectedCall = EXPECTED.has(input.expectedCall)
       ? input.expectedCall
       : "none";
