@@ -4,6 +4,16 @@ import { useEffect, useRef, useState } from "react";
 
 const MAX_SECONDS = 28;
 
+function supportedRecordingType() {
+  const candidates = [
+    { mimeType: "audio/webm;codecs=opus", extension: "webm" },
+    { mimeType: "audio/mp4;codecs=mp4a.40.2", extension: "m4a" },
+    { mimeType: "audio/mp4", extension: "m4a" },
+    { mimeType: "audio/webm", extension: "webm" },
+  ];
+  return candidates.find(({ mimeType }) => MediaRecorder.isTypeSupported(mimeType)) || { mimeType: "", extension: "webm" };
+}
+
 function Icon({ name, className = "h-5 w-5" }) {
   const paths = {
     shield: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></>,
@@ -86,13 +96,15 @@ export default function Home() {
     setError("");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const preferred = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
-      const recorder = new MediaRecorder(stream, { mimeType: preferred });
+      const format = supportedRecordingType();
+      const recorder = format.mimeType ? new MediaRecorder(stream, { mimeType: format.mimeType }) : new MediaRecorder(stream);
       chunksRef.current = [];
       recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data); };
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: preferred });
-        setAudioFile(new File([blob], `call-${Date.now()}.webm`, { type: "audio/webm" }));
+        const actualType = recorder.mimeType || format.mimeType || "audio/webm";
+        const extension = actualType.includes("mp4") ? "m4a" : format.extension;
+        const blob = new Blob(chunksRef.current, { type: actualType });
+        setAudioFile(new File([blob], `call-${Date.now()}.${extension}`, { type: actualType.split(";")[0] }));
         stream.getTracks().forEach((track) => track.stop());
         setRecording(false);
       };
@@ -110,7 +122,9 @@ export default function Home() {
     liveRequestsRef.current += 1;
     setProcessingChunk(true);
     const form = new FormData();
-    form.append("audio", new File([blob], `live-${Date.now()}.webm`, { type: "audio/webm" }));
+    const actualType = blob.type || "audio/webm";
+    const extension = actualType.includes("mp4") ? "m4a" : "webm";
+    form.append("audio", new File([blob], `live-${Date.now()}.${extension}`, { type: actualType.split(";")[0] }));
     form.append("language", language);
     try {
       const response = await fetch("/api/transcribe", { method: "POST", body: form });
@@ -187,12 +201,12 @@ export default function Home() {
 
   function recordLiveSegment(stream) {
     if (!liveActiveRef.current || !stream.active) return;
-    const preferred = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
-    const recorder = new MediaRecorder(stream, { mimeType: preferred });
+    const format = supportedRecordingType();
+    const recorder = format.mimeType ? new MediaRecorder(stream, { mimeType: format.mimeType }) : new MediaRecorder(stream);
     const chunks = [];
     recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
     recorder.onstop = async () => {
-      const segment = new Blob(chunks, { type: "audio/webm" });
+      const segment = new Blob(chunks, { type: recorder.mimeType || format.mimeType || "audio/webm" });
       // Begin capturing the next segment before the network call so speech is
       // not lost while Saaras processes this one.
       if (liveActiveRef.current) recordLiveSegment(stream);
@@ -213,7 +227,9 @@ export default function Home() {
     setNoSpeech(false);
     emptySegmentsRef.current = 0;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true },
+      });
       streamRef.current = stream;
       liveActiveRef.current = true;
       setLiveMode(true);

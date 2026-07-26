@@ -29,7 +29,8 @@ export async function POST(request) {
     if (!(audio instanceof File)) return json({ error: "Please record or upload an audio file." }, 400);
     if (audio.size === 0) return json({ error: "The audio file is empty." }, 400);
     if (audio.size > MAX_FILE_SIZE) return json({ error: "Audio must be smaller than 15 MB." }, 400);
-    if (audio.type && !ALLOWED_TYPES.has(audio.type)) {
+    const normalizedType = audio.type?.split(";")[0];
+    if (normalizedType && !ALLOWED_TYPES.has(normalizedType)) {
       return json({ error: "Unsupported audio format. Use WebM, WAV, MP3, M4A, OGG, AAC, or FLAC." }, 400);
     }
 
