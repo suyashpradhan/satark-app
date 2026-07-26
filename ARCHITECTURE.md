@@ -141,6 +141,18 @@ Success response:
 }
 ```
 
+### `POST /api/analyze-live`
+
+Content type: `application/json`
+
+After each successful live transcription segment, the browser sends the
+accumulated transcript to this endpoint unless the immediate safety rules have
+already raised an alert. Sarvam-30B performs meaning-based analysis across
+Hindi, Marathi, English and mixed speech. It looks for indirect or paraphrased
+sensitive requests, multi-step social engineering, urgency, secrecy, fear,
+rewards and instructions to leave official channels. The transcript is treated
+as untrusted content rather than instructions. Responses are not cached.
+
 ### `POST /api/analyze-call`
 
 Content type: `application/json`

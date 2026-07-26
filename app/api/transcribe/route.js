@@ -19,19 +19,19 @@ function json(body, status = 200) {
 
 export async function POST(request) {
   const apiKey = process.env.SARVAM_API_KEY;
-  if (!apiKey) return json({ error: "Sarvam API key is not configured." }, 503);
+  if (!apiKey) return json({ error: "आवाज़ पहचान सेवा उपलब्ध नहीं है।" }, 503);
 
   try {
     const incoming = await request.formData();
     const audio = incoming.get("audio");
     const language = incoming.get("language") || "unknown";
 
-    if (!(audio instanceof File)) return json({ error: "Please record or upload an audio file." }, 400);
-    if (audio.size === 0) return json({ error: "The audio file is empty." }, 400);
-    if (audio.size > MAX_FILE_SIZE) return json({ error: "Audio must be smaller than 15 MB." }, 400);
+    if (!(audio instanceof File)) return json({ error: "कृपया आवाज़ रिकॉर्ड करें या रिकॉर्डिंग चुनें।" }, 400);
+    if (audio.size === 0) return json({ error: "रिकॉर्डिंग खाली है।" }, 400);
+    if (audio.size > MAX_FILE_SIZE) return json({ error: "रिकॉर्डिंग 15 एमबी से छोटी होनी चाहिए।" }, 400);
     const normalizedType = audio.type?.split(";")[0];
     if (normalizedType && !ALLOWED_TYPES.has(normalizedType)) {
-      return json({ error: "Unsupported audio format. Use WebM, WAV, MP3, M4A, OGG, AAC, or FLAC." }, 400);
+      return json({ error: "यह रिकॉर्डिंग प्रारूप समर्थित नहीं है।" }, 400);
     }
 
     const body = new FormData();
@@ -52,12 +52,12 @@ export async function POST(request) {
     if (!response.ok) {
       let details = responseText;
       try { details = JSON.parse(responseText)?.detail || responseText; } catch {}
-      return json({ error: "Sarvam could not transcribe this audio.", details }, response.status);
+      return json({ error: "रिकॉर्डिंग समझ नहीं आई। कृपया फिर से कोशिश करें।", details }, response.status);
     }
 
     const data = JSON.parse(responseText);
     const transcript = data.transcript?.trim();
-    if (!transcript) return json({ error: "No speech was detected. Try again closer to the speaker." }, 422);
+    if (!transcript) return json({ error: "आवाज़ नहीं मिली। फ़ोन को स्पीकर के पास रखकर फिर कोशिश करें।" }, 422);
 
     return json({
       transcript,
@@ -67,6 +67,6 @@ export async function POST(request) {
     });
   } catch (error) {
     const timedOut = error?.name === "TimeoutError";
-    return json({ error: timedOut ? "Transcription took too long. Try a shorter recording." : "Something went wrong while transcribing the call." }, 500);
+    return json({ error: timedOut ? "रिकॉर्डिंग समझने में बहुत समय लगा। छोटी रिकॉर्डिंग से कोशिश करें।" : "रिकॉर्डिंग समझते समय समस्या हुई।" }, 500);
   }
 }

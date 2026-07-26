@@ -23,14 +23,14 @@ function json(body, status = 200) {
 
 export async function POST(request) {
   const apiKey = process.env.SARVAM_API_KEY;
-  if (!apiKey) return json({ error: "Sarvam API key is not configured." }, 503);
+  if (!apiKey) return json({ error: "कॉल जाँच सेवा उपलब्ध नहीं है।" }, 503);
 
   try {
     const input = await request.json();
     const transcript =
       typeof input.transcript === "string" ? input.transcript.trim() : "";
-    const language =
-      typeof input.language === "string" ? input.language : "unknown";
+    const language = typeof input.language === "string" ? input.language : "unknown";
+    const outputLanguage = language === "mr-IN" ? "Marathi" : "Hindi";
     const expectedCall = EXPECTED.has(input.expectedCall)
       ? input.expectedCall
       : "none";
@@ -42,9 +42,9 @@ export async function POST(request) {
       : "unsure";
 
     if (!transcript)
-      return json({ error: "Confirm the transcript before continuing." }, 400);
+      return json({ error: "आगे बढ़ने से पहले बातचीत का टेक्स्ट जाँच लें।" }, 400);
     if (transcript.length > 10000)
-      return json({ error: "The transcript is too long for this check." }, 400);
+      return json({ error: "यह बातचीत जाँच के लिए बहुत लंबी है।" }, 400);
 
     let assessment;
     let analysisMode = "Sarvam-30B";
@@ -61,15 +61,17 @@ export async function POST(request) {
           body: JSON.stringify({
             model: "sarvam-30b",
             temperature: 0.1,
+            reasoning_effort: null,
+            max_tokens: 1000,
             messages: [
               {
                 role: "system",
                 content:
-                  "You are a conservative call-safety assistant for elderly Indian users. Analyse only observable words in the confirmed transcript and the user's answers. NEVER say a claim is true, false, genuine, fake, fraud, scam, verified, or invalid. You cannot authenticate the caller. In callerClaim, briefly quote or closely paraphrase only who the caller says they are. In reasonForCall, report only their stated reason. Treat requests for OTP, PIN, CVV, passwords, transfers, screen sharing, installing apps, or urgent sensitive documents as high risk. An expected call does not make the caller genuine. If the user reports a sensitive request or pressure that is not clear in the transcript, say it was reported by the user rather than quoting it as transcript evidence. Give short, calm, plain-language output. The safest verification step must use an independently found official number, never contact details supplied in the call. Do not provide financial, legal, or medical advice.",
+                  `You are a conservative call-safety assistant for elderly Indian users. Analyse meaning across Hindi, Marathi, English and mixed-language speech, including paraphrasing and indirect social engineering. Analyse only observable words in the confirmed transcript and the user's answers. NEVER say a claim is true, false, genuine, fake, fraud, scam, verified, or invalid. You cannot authenticate the caller. In callerClaim, briefly quote or closely paraphrase only who the caller says they are. In reasonForCall, report only their stated reason. Treat requests for credentials, identity/bank/insurance/pension documents, money or fees, QR/UPI, screen sharing, installing apps, links, WhatsApp redirection, or urgent in-person document collection as high risk. Consider pressure, secrecy, fear, rewards, authority and threats even when spread across sentences. An expected call does not make the caller genuine. If the user reports a sensitive request or pressure that is not clear in the transcript, say it was reported by the user rather than quoting it as transcript evidence. Every user-visible value in the JSON must be short, calm, plain ${outputLanguage}; do not mix English into it except unavoidable proper nouns. The safest verification step must use an independently found official number, never contact details supplied in the call. Do not provide financial, legal, or medical advice.`,
               },
               {
                 role: "user",
-                content: `Preferred output language: ${language}.\nExpected call: ${expectedCall}.\nUser says sensitive information, money, or app installation was requested: ${sensitiveRequest}.\nUser says urgency or pressure was used: ${pressureUsed}.\n\nConfirmed transcript:\n${transcript}`,
+                content: `Output language: ${outputLanguage}.\nExpected call: ${expectedCall}.\nUser says sensitive information, money, or app installation was requested: ${sensitiveRequest}.\nUser says urgency or pressure was used: ${pressureUsed}.\n\nConfirmed transcript:\n${transcript}`,
               },
             ],
             response_format: { type: "json_schema", json_schema: safetySchema },
@@ -96,7 +98,7 @@ export async function POST(request) {
           ...rules.warningSignals,
           ...(sensitiveRequest === "yes"
             ? [
-                "The user confirmed that sensitive information, money, or app installation was requested",
+                "आपने बताया कि गुप्त जानकारी, पैसे या ऐप की माँग की गई",
               ]
             : []),
         ]),
@@ -109,7 +111,7 @@ export async function POST(request) {
       assessment.warningSignals = [
         ...new Set([
           ...(assessment.warningSignals || []),
-          "The user confirmed that the caller used urgency or pressure",
+          "आपने बताया कि कॉलर ने जल्दी करने का दबाव डाला",
         ]),
       ];
     }
@@ -121,7 +123,7 @@ export async function POST(request) {
       forbiddenVerdict.test(assessment.callerClaim)
     ) {
       assessment.callerClaim =
-        "The caller's identity was not established in the recording";
+        "रिकॉर्डिंग से कॉलर की पहचान स्थापित नहीं हुई";
     }
 
     return json({
@@ -130,7 +132,7 @@ export async function POST(request) {
       answers: { sensitiveRequest, pressureUsed },
       assessment: {
         ...assessment,
-        verificationStatus: "Not independently verified",
+        verificationStatus: "स्वतंत्र रूप से जाँचा नहीं गया",
         analysisMode,
       },
     });
@@ -139,8 +141,8 @@ export async function POST(request) {
     return json(
       {
         error: timedOut
-          ? "The safety check took too long. Please try again."
-          : "Something went wrong while checking the call.",
+          ? "सुरक्षा जाँच में बहुत समय लगा। कृपया फिर कोशिश करें।"
+          : "कॉल की जाँच करते समय समस्या हुई।",
       },
       500,
     );

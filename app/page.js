@@ -59,6 +59,8 @@ export default function Home() {
   const meterFrameRef = useRef(null);
   const chunksRef = useRef([]);
   const fileRef = useRef(null);
+  const warningTriggeredRef = useRef(false);
+  const liveSessionRef = useRef(0);
 
   useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
 
@@ -80,12 +82,14 @@ export default function Home() {
 
   function setAudioFile(file) {
     if (!file) return;
+    liveSessionRef.current += 1;
     liveActiveRef.current = false;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     setLiveMode(false);
     setLiveTranscript("");
     liveTranscriptRef.current = "";
     setLiveWarning(null);
+    warningTriggeredRef.current = false;
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     setAudio(file);
     setAudioUrl(URL.createObjectURL(file));
@@ -116,11 +120,11 @@ export default function Home() {
       recorder.start();
       setRecording(true);
     } catch {
-      setError("Microphone access was unavailable. You can upload a recording instead.");
+      setError("माइक्रोफ़ोन उपलब्ध नहीं है। सेव की हुई रिकॉर्डिंग चुन सकते हैं।");
     }
   }
 
-  async function sendLiveChunk(blob) {
+  async function sendLiveChunk(blob, sessionId) {
     if (!blob.size) return;
     liveRequestsRef.current += 1;
     setProcessingChunk(true);
@@ -132,6 +136,7 @@ export default function Home() {
     try {
       const response = await fetch("/api/transcribe", { method: "POST", body: form });
       const data = await response.json();
+      if (sessionId !== liveSessionRef.current) return;
       if (response.status === 422) {
         emptySegmentsRef.current += 1;
         if (emptySegmentsRef.current >= 2) {
@@ -155,16 +160,14 @@ export default function Home() {
       // This catches requests whose setup and risky action land in different chunks.
       const cumulativeSafety = fallbackAssessment(nextTranscript);
       if (cumulativeSafety.riskLevel === "high") {
-        setLiveWarning(cumulativeSafety);
-        triggerCriticalAlert();
-        liveActiveRef.current = false;
-        streamRef.current?.getTracks().forEach((track) => track.stop());
-        stopMicMeter();
-        setRecording(false);
-        setStatus("live-alert");
+        showLiveWarning(cumulativeSafety);
+      } else {
+        // The semantic layer catches paraphrasing, mixed languages and multi-step
+        // social engineering that a finite phrase list cannot represent.
+        checkSemanticRisk(nextTranscript, sessionId);
       }
     } catch (err) {
-      setError(err.message || "Live transcription failed. Try the saved-recording option.");
+      setError(err.message || "बातचीत समझ नहीं आई। सेव की हुई रिकॉर्डिंग से कोशिश करें।");
       liveActiveRef.current = false;
       streamRef.current?.getTracks().forEach((track) => track.stop());
       stopMicMeter();
@@ -173,6 +176,34 @@ export default function Home() {
     } finally {
       liveRequestsRef.current = Math.max(0, liveRequestsRef.current - 1);
       setProcessingChunk(liveRequestsRef.current > 0);
+    }
+  }
+
+  function showLiveWarning(assessment) {
+    if (warningTriggeredRef.current) return;
+    warningTriggeredRef.current = true;
+    setLiveWarning(assessment);
+    triggerCriticalAlert();
+    liveActiveRef.current = false;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    stopMicMeter();
+    setRecording(false);
+    setStatus("live-alert");
+  }
+
+  async function checkSemanticRisk(currentTranscript, sessionId) {
+    try {
+      const response = await fetch("/api/analyze-live", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript: currentTranscript }),
+      });
+      if (!response.ok || warningTriggeredRef.current || sessionId !== liveSessionRef.current) return;
+      const assessment = await response.json();
+      if (assessment.riskLevel === "high") showLiveWarning(assessment);
+    } catch {
+      // Live transcription and the on-device rules continue if this optional
+      // semantic layer is temporarily unavailable.
     }
   }
 
@@ -231,7 +262,7 @@ export default function Home() {
     } catch {}
   }
 
-  function recordLiveSegment(stream) {
+  function recordLiveSegment(stream, sessionId) {
     if (!liveActiveRef.current || !stream.active) return;
     const format = supportedRecordingType();
     const recorder = format.mimeType ? new MediaRecorder(stream, { mimeType: format.mimeType }) : new MediaRecorder(stream);
@@ -241,8 +272,8 @@ export default function Home() {
       const segment = new Blob(chunks, { type: recorder.mimeType || format.mimeType || "audio/webm" });
       // Begin capturing the next segment before the network call so speech is
       // not lost while Saaras processes this one.
-      if (liveActiveRef.current) recordLiveSegment(stream);
-      await sendLiveChunk(segment);
+      if (liveActiveRef.current && sessionId === liveSessionRef.current) recordLiveSegment(stream, sessionId);
+      await sendLiveChunk(segment, sessionId);
       if (!liveActiveRef.current) stream.getTracks().forEach((track) => track.stop());
     };
     recorderRef.current = recorder;
@@ -253,10 +284,13 @@ export default function Home() {
   }
 
   async function startLiveCheck() {
+    const sessionId = liveSessionRef.current + 1;
+    liveSessionRef.current = sessionId;
     setError("");
     setLiveTranscript("");
     liveTranscriptRef.current = "";
     setLiveWarning(null);
+    warningTriggeredRef.current = false;
     setNoSpeech(false);
     emptySegmentsRef.current = 0;
     try {
@@ -269,7 +303,7 @@ export default function Home() {
       setRecording(true);
       setStatus("live");
       startMicMeter(stream);
-      recordLiveSegment(stream);
+      recordLiveSegment(stream, sessionId);
     } catch {
       setError("माइक्रोफ़ोन शुरू नहीं हुआ। नीचे से सेव रिकॉर्डिंग चुनें।");
     }
@@ -308,12 +342,12 @@ export default function Home() {
     try {
       const response = await fetch("/api/transcribe", { method: "POST", body: form });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.details || data.error || "Transcription failed");
+      if (!response.ok) throw new Error(data.error || "रिकॉर्डिंग समझ नहीं आई।");
       setTranscript(data.transcript);
       setDetectedLanguage(data.detectedLanguage || language);
       setStatus("confirming");
     } catch (err) {
-      setError(typeof err.message === "string" ? err.message : "Could not check this call.");
+      setError(typeof err.message === "string" ? err.message : "इस कॉल की जाँच नहीं हो सकी।");
       setStatus("ready");
     }
   }
@@ -329,11 +363,11 @@ export default function Home() {
         body: JSON.stringify({ transcript, language: detectedLanguage || language, expectedCall, sensitiveRequest, pressureUsed }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Analysis failed");
+      if (!response.ok) throw new Error(data.error || "जाँच पूरी नहीं हो सकी।");
       setResult(data);
       setStatus("done");
     } catch (err) {
-      setError(typeof err.message === "string" ? err.message : "Could not check this call.");
+      setError(typeof err.message === "string" ? err.message : "इस कॉल की जाँच नहीं हो सकी।");
       setStatus("confirming");
     }
   }
@@ -343,17 +377,19 @@ export default function Home() {
     liveActiveRef.current = false;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     stopMicMeter();
+    liveSessionRef.current += 1;
     liveTranscriptRef.current = "";
+    warningTriggeredRef.current = false;
     setAudio(null); setAudioUrl(""); setResult(null); setTranscript(""); setDetectedLanguage(""); setLiveMode(false); setLiveTranscript(""); setLiveWarning(null); setNoSpeech(false); setError(""); setStatus("idle"); setSeconds(0); setExpectedCall("none"); setSensitiveRequest("unsure"); setPressureUsed("unsure");
     if (fileRef.current) fileRef.current.value = "";
   }
 
   async function shareResult() {
     if (!result) return;
-    const text = `Satark — Pehle jaanch, phir action.\nStatus: ${result.assessment.verificationStatus}\n${result.assessment.summary}\n\nSafe next steps:\n${result.assessment.safeNextSteps.map((step, index) => `${index + 1}. ${step}`).join("\n")}`;
+    const text = `सतर्क — पहले जाँच, फिर कदम।\nस्थिति: कॉलर की पहचान स्वतंत्र रूप से जाँची नहीं गई है\n${result.assessment.summary}\n\nसुरक्षित अगले कदम:\n${result.assessment.safeNextSteps.map((step, index) => `${index + 1}. ${step}`).join("\n")}`;
     try {
-      if (navigator.share) await navigator.share({ title: "Call safety card", text });
-      else { await navigator.clipboard.writeText(text); alert("Safety card copied. You can send it to your family."); }
+      if (navigator.share) await navigator.share({ title: "कॉल सुरक्षा सूचना", text });
+      else { await navigator.clipboard.writeText(text); alert("सुरक्षा सूचना कॉपी हो गई। इसे परिवार को भेज सकते हैं।"); }
     } catch {}
   }
 
@@ -366,10 +402,10 @@ export default function Home() {
     {liveWarning && <div className="fixed inset-0 z-50 flex min-h-screen flex-col bg-[#fff7f6] px-6 py-8 text-center" role="alertdialog" aria-modal="true">
       <div className="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center">
         <span className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-[var(--red)] text-white"><Icon name="alert" className="h-10 w-10" /></span>
-        <p className="mt-7 text-sm font-bold uppercase tracking-[.18em] text-[var(--red)]">जोखिम भरी माँग मिली</p>
-        <h2 className="mt-4 text-4xl font-semibold leading-tight tracking-[-.03em]">रुकिए। कुछ साझा न करें।</h2>
+        <p className="mt-7 text-sm font-bold tracking-[.12em] text-[var(--red)]">धोखाधड़ी का खतरा</p>
+        <h2 className="mt-4 text-4xl font-semibold leading-tight tracking-[-.03em]">रुकिए। कॉल काट दीजिए।</h2>
         {liveWarning.evidencePhrases?.[0] && <blockquote className="mt-7 border-y border-red-200 py-5 text-xl font-medium leading-8">“{liveWarning.evidencePhrases[0]}”</blockquote>}
-        <p className="mx-auto mt-6 max-w-md text-lg leading-8 text-[var(--muted)]">कॉल काटें। OTP, PIN या पैसा साझा न करें। संस्था के आधिकारिक नंबर से खुद जाँच करें।</p>
+        <p className="mx-auto mt-6 max-w-md text-lg leading-8 text-[var(--muted)]">कोई गुप्त संख्या, दस्तावेज़ या पैसा साझा न करें। संस्था के आधिकारिक नंबर पर स्वयं जाँच करें।</p>
       </div>
       <div className="mx-auto w-full max-w-lg">
         <button onClick={continueFromLive} className="w-full rounded-full bg-[var(--red)] px-6 py-5 text-lg font-semibold text-white">कॉल काट दी — पूरी जाँच देखें</button>
@@ -379,8 +415,8 @@ export default function Home() {
     <main className="mx-auto min-h-screen max-w-xl px-5 py-8 md:py-12">
       <header className="mb-12 text-center">
         <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-black text-white"><Icon name="shield" className="h-6 w-6" /></span>
-        <h1 className="mt-4 text-3xl font-semibold tracking-[-.03em]">Satark</h1>
-        <p className="mt-1 text-base font-medium text-[var(--muted)]">Pehle jaanch, phir action.</p>
+        <h1 className="mt-4 text-3xl font-semibold tracking-[-.03em]">सतर्क</h1>
+        <p className="mt-1 text-base font-medium text-[var(--muted)]">पहले जाँच, फिर कदम।</p>
       </header>
 
       <section>
@@ -388,11 +424,11 @@ export default function Home() {
           {!result && !transcript ? <>
             <div className="text-center">
               <h2 className="text-3xl font-semibold tracking-[-.025em]">लाइव कॉल की जाँच करें</h2>
-              <p className="mx-auto mt-3 max-w-sm text-lg leading-7 text-[var(--muted)]">फ़ोन को स्पीकर पर रखें। Satark बातचीत सुनकर जोखिम भरी माँग पर तुरंत रोकेगा।</p>
+              <p className="mx-auto mt-3 max-w-sm text-lg leading-7 text-[var(--muted)]">फ़ोन को स्पीकर पर रखें। सतर्क बातचीत सुनकर जोखिम भरी माँग पर तुरंत रोकेगा।</p>
             </div>
 
             <div className="mt-10 divide-y divide-black/10 border-y border-black/10">
-              <label className="flex items-center justify-between gap-4 py-4 text-base font-medium"><span>भाषा</span><select aria-label="Spoken language" value={language} onChange={(e) => setLanguage(e.target.value)} className="max-w-[55%] bg-transparent py-2 text-right text-base text-[var(--muted)]"><option value="unknown">अपने आप पहचानें</option><option value="hi-IN">हिंदी</option><option value="mr-IN">मराठी</option></select></label>
+              <label className="flex items-center justify-between gap-4 py-4 text-base font-medium"><span>भाषा</span><select aria-label="बातचीत की भाषा" value={language} onChange={(e) => setLanguage(e.target.value)} className="max-w-[55%] bg-transparent py-2 text-right text-base text-[var(--muted)]"><option value="unknown">अपने आप पहचानें</option><option value="hi-IN">हिंदी</option><option value="mr-IN">मराठी</option></select></label>
             </div>
 
             <div className="mt-9">
@@ -409,7 +445,7 @@ export default function Home() {
             {liveMode && <section className="mt-8" aria-live="polite">
               {liveWarning ? <div className="border-y-2 border-[var(--red)] py-6 text-center">
                 <p className="text-sm font-bold uppercase tracking-[.15em] text-[var(--red)]">जोखिम भरी माँग मिली</p>
-                <p className="mt-3 text-3xl font-semibold leading-tight">रुकिए। कोई OTP, PIN या पैसा साझा न करें।</p>
+                <p className="mt-3 text-3xl font-semibold leading-tight">रुकिए। कोई गुप्त संख्या, दस्तावेज़ या पैसा साझा न करें।</p>
                 <p className="mt-3 text-base leading-7 text-[var(--muted)]">कॉल काटें और संस्था के आधिकारिक नंबर से खुद जाँच करें।</p>
               </div> : noSpeech ? <div className="border-y border-black/15 py-6 text-center">
                 <p className="text-2xl font-semibold">आवाज़ साफ़ नहीं मिली</p>
@@ -417,10 +453,10 @@ export default function Home() {
                 <button onClick={startLiveCheck} className="mt-5 rounded-full bg-black px-6 py-3 font-semibold text-white">फिर से सुनें</button>
               </div> : <div className="flex items-center justify-center gap-3 border-y border-black/10 py-5">
                 <span className={`h-3 w-3 rounded-full ${recording ? "bg-[var(--red)] recording-pulse" : "bg-black/25"}`} />
-                <p className="font-semibold">{recording ? "Satark सुन रहा है…" : processingChunk ? "आखिरी हिस्सा पढ़ा जा रहा है…" : "लाइव जाँच रुकी हुई है"}</p>
+                <p className="font-semibold">{recording ? "सतर्क सुन रहा है…" : processingChunk ? "आखिरी हिस्सा जाँचा जा रहा है…" : "लाइव जाँच रुकी हुई है"}</p>
               </div>}
 
-              {recording && <div className="mt-5" aria-label={`Microphone level ${micLevel} percent`}>
+              {recording && <div className="mt-5" aria-label={`माइक्रोफ़ोन आवाज़ स्तर ${micLevel} प्रतिशत`}>
                 <div className="h-2 overflow-hidden rounded-full bg-black/10"><div className="h-full rounded-full bg-black transition-[width] duration-100" style={{ width: `${Math.max(3, micLevel)}%` }} /></div>
                 <div className="mt-2 flex justify-between text-xs font-medium text-[var(--muted)]"><span>{micLevel > 8 ? "आवाज़ आ रही है" : "थोड़ा पास बोलें"}</span><span>माइक्रोफ़ोन</span></div>
               </div>}
@@ -438,7 +474,7 @@ export default function Home() {
             {audio && !liveMode && <button disabled={status === "transcribing"} onClick={transcribe} className="mt-7 flex w-full items-center justify-center gap-2 rounded-full bg-black px-5 py-5 text-lg font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-25">
               {status === "transcribing" ? "कॉल सुनी जा रही है…" : <>आगे बढ़ें <Icon name="arrow" /></>}
             </button>}
-            <p className="mx-auto mt-5 max-w-sm text-center text-sm leading-6 text-[var(--muted)]">कॉलर की पहचान साबित नहीं होती। OTP, PIN, CVV या पासवर्ड कभी साझा न करें।</p>
+            <p className="mx-auto mt-5 max-w-sm text-center text-sm leading-6 text-[var(--muted)]">कॉलर की पहचान साबित नहीं होती। कोई गुप्त संख्या या पासवर्ड कभी साझा न करें।</p>
           </> : !result ? <>
             <div className="text-center">
               <p className="text-sm font-semibold text-[var(--muted)]">एक बार जाँच लें</p>
@@ -446,15 +482,15 @@ export default function Home() {
             </div>
 
             <label className="mt-8 block text-sm font-semibold text-[var(--muted)]">बातचीत का टेक्स्ट
-              <textarea aria-label="Confirmed transcript" value={transcript} onChange={(event) => setTranscript(event.target.value)} rows={6} className="mt-3 w-full resize-y rounded-2xl border border-black/15 bg-white p-4 text-lg leading-8 outline-none focus:border-black" />
+              <textarea aria-label="जाँची हुई बातचीत" value={transcript} onChange={(event) => setTranscript(event.target.value)} rows={6} className="mt-3 w-full resize-y rounded-2xl border border-black/15 bg-white p-4 text-lg leading-8 outline-none focus:border-black" />
             </label>
             <p className="mt-2 text-sm text-[var(--muted)]">गलत शब्द पर टैप करके उसे ठीक करें।</p>
 
             <div className="mt-9 divide-y divide-black/10 border-y border-black/10">
               <label className="block py-5 text-base font-semibold">क्या इस कॉल की उम्मीद थी?
-                <select aria-label="Expected call" value={expectedCall} onChange={(e) => setExpectedCall(e.target.value)} className="mt-3 w-full rounded-xl bg-[var(--soft)] px-4 py-3 text-base"><option value="none">नहीं / पता नहीं</option><option value="bank">हाँ, बैंक</option><option value="pension">हाँ, पेंशन</option><option value="hospital">हाँ, अस्पताल</option><option value="delivery">हाँ, डिलीवरी</option><option value="insurance">हाँ, बीमा</option></select>
+                <select aria-label="क्या कॉल की उम्मीद थी" value={expectedCall} onChange={(e) => setExpectedCall(e.target.value)} className="mt-3 w-full rounded-xl bg-[var(--soft)] px-4 py-3 text-base"><option value="none">नहीं / पता नहीं</option><option value="bank">हाँ, बैंक</option><option value="pension">हाँ, पेंशन</option><option value="hospital">हाँ, अस्पताल</option><option value="delivery">हाँ, डिलीवरी</option><option value="insurance">हाँ, बीमा</option></select>
               </label>
-              <Question label="क्या OTP, PIN, पैसे, दस्तावेज़ या ऐप माँगा गया?" value={sensitiveRequest} onChange={setSensitiveRequest} />
+              <Question label="क्या गुप्त संख्या, पैसे, दस्तावेज़ या कोई ऐप माँगा गया?" value={sensitiveRequest} onChange={setSensitiveRequest} />
               <Question label="क्या जल्दी करने का दबाव या धमकी दी गई?" value={pressureUsed} onChange={setPressureUsed} />
             </div>
 
@@ -479,7 +515,7 @@ export default function Home() {
             {result.assessment.warningSignals?.length > 0 && <List title="सावधानी के संकेत" items={result.assessment.warningSignals} tone="red" />}
             <List title="अब सुरक्षित रूप से क्या करें" items={result.assessment.safeNextSteps} tone="green" numbered />
 
-            <details className="mt-7 border-y border-black/10 py-4"><summary className="cursor-pointer font-semibold">पूरी बातचीत पढ़ें</summary><p className="mt-3 whitespace-pre-wrap text-base leading-7 text-[var(--muted)]">{result.transcript}</p><p className="mt-3 text-xs text-[var(--muted)]">Detected: {result.detectedLanguage} · Analysis: {result.assessment.analysisMode}</p></details>
+            <details className="mt-7 border-y border-black/10 py-4"><summary className="cursor-pointer font-semibold">पूरी बातचीत पढ़ें</summary><p className="mt-3 whitespace-pre-wrap text-base leading-7 text-[var(--muted)]">{result.transcript}</p></details>
             <button onClick={shareResult} className="mt-8 flex w-full items-center justify-center gap-2 rounded-full bg-black px-5 py-5 text-lg font-semibold text-white"><Icon name="share" /> परिवार को भेजें</button>
             <button onClick={reset} className="mx-auto mt-4 flex items-center justify-center gap-2 px-5 py-3 font-semibold text-[var(--muted)]"><Icon name="refresh" /> दूसरी कॉल जाँचें</button>
           </>}
