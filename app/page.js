@@ -39,6 +39,7 @@ export default function Home() {
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const liveActiveRef = useRef(false);
+  const liveRequestsRef = useRef(0);
   const chunksRef = useRef([]);
   const fileRef = useRef(null);
 
@@ -94,6 +95,7 @@ export default function Home() {
 
   async function sendLiveChunk(blob) {
     if (!blob.size) return;
+    liveRequestsRef.current += 1;
     setProcessingChunk(true);
     const form = new FormData();
     form.append("audio", new File([blob], `live-${Date.now()}.webm`, { type: "audio/webm" }));
@@ -118,7 +120,8 @@ export default function Home() {
       setRecording(false);
       setStatus("idle");
     } finally {
-      setProcessingChunk(false);
+      liveRequestsRef.current = Math.max(0, liveRequestsRef.current - 1);
+      setProcessingChunk(liveRequestsRef.current > 0);
     }
   }
 
@@ -129,9 +132,12 @@ export default function Home() {
     const chunks = [];
     recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
     recorder.onstop = async () => {
-      await sendLiveChunk(new Blob(chunks, { type: "audio/webm" }));
+      const segment = new Blob(chunks, { type: "audio/webm" });
+      // Begin capturing the next segment before the network call so speech is
+      // not lost while Saaras processes this one.
       if (liveActiveRef.current) recordLiveSegment(stream);
-      else stream.getTracks().forEach((track) => track.stop());
+      await sendLiveChunk(segment);
+      if (!liveActiveRef.current) stream.getTracks().forEach((track) => track.stop());
     };
     recorderRef.current = recorder;
     recorder.start();
