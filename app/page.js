@@ -27,6 +27,7 @@ function Icon({ name, className = "h-5 w-5" }) {
     share: <><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></>,
     volume: <><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/></>,
     phone: <><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2.1Z"/></>,
+    download: <><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></>,
   };
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -54,6 +55,9 @@ export default function Home() {
   const [trustedPhone, setTrustedPhone] = useState("");
   const [phoneDraft, setPhoneDraft] = useState("");
   const [phoneSaved, setPhoneSaved] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [showIosInstall, setShowIosInstall] = useState(false);
+  const [installStatus, setInstallStatus] = useState("");
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const liveActiveRef = useRef(false);
@@ -82,9 +86,50 @@ export default function Home() {
 
   useEffect(() => {
     const saved = window.localStorage.getItem("satark-trusted-phone") || "";
+    const savedLanguage = window.localStorage.getItem("satark-language");
     setTrustedPhone(saved);
     setPhoneDraft(saved);
+    if (["unknown", "hi-IN", "mr-IN"].includes(savedLanguage)) setLanguage(savedLanguage);
   }, []);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production" && "serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" }).catch(() => {});
+    }
+
+    const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+    const isiPhoneOrIPad = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+    setShowIosInstall(isiPhoneOrIPad && !standalone);
+
+    const capturePrompt = (event) => {
+      event.preventDefault();
+      setInstallPrompt(event);
+    };
+    const installed = () => {
+      setInstallPrompt(null);
+      setShowIosInstall(false);
+      setInstallStatus("सतर्क आपके फ़ोन पर जुड़ गया।");
+    };
+    window.addEventListener("beforeinstallprompt", capturePrompt);
+    window.addEventListener("appinstalled", installed);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", capturePrompt);
+      window.removeEventListener("appinstalled", installed);
+    };
+  }, []);
+
+  async function installApp() {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const choice = await installPrompt.userChoice;
+    if (choice.outcome === "accepted") setInstallStatus("सतर्क आपके फ़ोन पर जुड़ गया।");
+    setInstallPrompt(null);
+  }
+
+  function changeLanguage(value) {
+    setLanguage(value);
+    window.localStorage.setItem("satark-language", value);
+  }
 
   useEffect(() => {
     if (!recording) return;
@@ -497,7 +542,7 @@ export default function Home() {
             </div>
 
             <div className="mt-10 divide-y divide-black/10 border-y border-black/10">
-              <label className="flex items-center justify-between gap-4 py-4 text-base font-medium"><span>भाषा</span><select aria-label="बातचीत की भाषा" value={language} onChange={(e) => setLanguage(e.target.value)} className="max-w-[55%] bg-transparent py-2 text-right text-base text-[var(--muted)]"><option value="unknown">अपने आप पहचानें</option><option value="hi-IN">हिंदी</option><option value="mr-IN">मराठी</option></select></label>
+              <label className="flex items-center justify-between gap-4 py-4 text-base font-medium"><span>भाषा</span><select aria-label="बातचीत की भाषा" value={language} onChange={(e) => changeLanguage(e.target.value)} className="max-w-[55%] bg-transparent py-2 text-right text-base text-[var(--muted)]"><option value="unknown">अपने आप पहचानें</option><option value="hi-IN">हिंदी</option><option value="mr-IN">मराठी</option></select></label>
               <details className="py-4">
                 <summary className="cursor-pointer text-base font-medium">परिवार की मदद सेट करें</summary>
                 <div className="mt-4 flex gap-2">
@@ -508,7 +553,20 @@ export default function Home() {
                 <p className="mt-2 text-sm text-[var(--muted)]">नंबर केवल इसी फ़ोन पर सुरक्षित रहेगा।</p>
                 {phoneSaved && <p className="mt-2 text-sm font-semibold text-[#087a54]" role="status">नंबर सहेज दिया गया।</p>}
               </details>
+              {installPrompt && <div className="flex items-center justify-between gap-4 py-4">
+                <div><p className="font-medium">फ़ोन पर सतर्क रखें</p><p className="mt-1 text-sm text-[var(--muted)]">अगली बार एक टैप में खोलें।</p></div>
+                <button type="button" onClick={installApp} className="flex shrink-0 items-center gap-2 rounded-full bg-black px-5 py-3 font-semibold text-white"><Icon name="download" /> जोड़ें</button>
+              </div>}
+              {showIosInstall && <details className="py-4">
+                <summary className="cursor-pointer text-base font-medium">iPhone पर सतर्क रखें</summary>
+                <ol className="mt-4 space-y-2 text-sm leading-6 text-[var(--muted)]">
+                  <li>1. Safari में नीचे Share बटन दबाएँ।</li>
+                  <li>2. “Add to Home Screen” चुनें।</li>
+                  <li>3. “Open as Web App” चालू करके Add दबाएँ।</li>
+                </ol>
+              </details>}
             </div>
+            {installStatus && <p className="mt-4 text-center text-sm font-semibold text-[#087a54]" role="status">{installStatus}</p>}
 
             <div className="mt-9">
               <button onClick={recording && liveMode ? stopLiveCheck : startLiveCheck} className={`flex w-full min-h-20 items-center justify-center gap-3 rounded-full px-6 text-lg font-semibold transition ${recording && liveMode ? "recording-pulse bg-[var(--red)] text-white" : "bg-black text-white hover:bg-neutral-800"}`}>

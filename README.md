@@ -11,6 +11,15 @@ A Hindi/Marathi call-safety assistant for elderly users. It transcribes a short 
 
 The key is read only in the server route and is never sent to the browser.
 
+## Install on a phone
+
+After deploying over HTTPS:
+
+- Android: open Satark in Chrome and use the in-app **फ़ोन पर सतर्क रखें** action when offered.
+- iPhone: open Satark in Safari, tap Share, choose **Add to Home Screen**, enable **Open as Web App**, and tap Add.
+
+The installed app opens in standalone mode. Language and the optional trusted-family phone number remain on that device. Audio, transcripts, analysis responses, and generated speech are not cached by the service worker.
+
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for the complete request flow, data lifecycle, caching policy, security boundary, and deployment plan.
 
 ## MVP limits

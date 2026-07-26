@@ -184,6 +184,19 @@ The optional trusted-family phone number is stored only in browser
 `localStorage`; it is never sent to Satark or Sarvam. The emergency action uses
 the device's `tel:` handler and still requires the user to place the call.
 
+## Progressive Web App shell
+
+Satark includes a web app manifest, home-screen icons, standalone display
+metadata, and a small service worker. The service worker caches only the public
+application shell, static build assets, icons, and the offline guidance page.
+It explicitly bypasses every `/api/` request, so recordings, transcripts,
+analysis results, and generated speech are never placed in the browser cache.
+
+Android-compatible browsers can offer their native installation prompt. iPhone
+users receive Safari's manual Add to Home Screen instructions. The selected
+language and optional trusted-family phone number remain device-local in
+`localStorage`.
+
 ## 5. Data and storage
 
 ### Currently stored

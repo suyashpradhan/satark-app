@@ -22,6 +22,8 @@ body {
   background: var(--paper);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 button, input, select { font: inherit; }
@@ -35,4 +37,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .recording-pulse { animation: none; }
+}
+
+@media (display-mode: standalone) {
+  body { overscroll-behavior-y: none; }
 }
