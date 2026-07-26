@@ -51,6 +51,7 @@ export default function Home() {
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const liveActiveRef = useRef(false);
+  const liveTranscriptRef = useRef("");
   const liveRequestsRef = useRef(0);
   const emptySegmentsRef = useRef(0);
   const audioContextRef = useRef(null);
@@ -82,6 +83,7 @@ export default function Home() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     setLiveMode(false);
     setLiveTranscript("");
+    liveTranscriptRef.current = "";
     setLiveWarning(null);
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     setAudio(file);
@@ -145,7 +147,9 @@ export default function Home() {
       emptySegmentsRef.current = 0;
       setNoSpeech(false);
       setDetectedLanguage(data.detectedLanguage || language);
-      setLiveTranscript((current) => `${current}${current ? " " : ""}${data.transcript}`.trim());
+      const nextTranscript = `${liveTranscriptRef.current}${liveTranscriptRef.current ? " " : ""}${data.transcript}`.trim();
+      liveTranscriptRef.current = nextTranscript;
+      setLiveTranscript(nextTranscript);
       if (data.quickSafety?.riskLevel === "high") {
         setLiveWarning(data.quickSafety);
         navigator.vibrate?.([220, 100, 360]);
@@ -223,6 +227,7 @@ export default function Home() {
   async function startLiveCheck() {
     setError("");
     setLiveTranscript("");
+    liveTranscriptRef.current = "";
     setLiveWarning(null);
     setNoSpeech(false);
     emptySegmentsRef.current = 0;
@@ -252,8 +257,15 @@ export default function Home() {
   }
 
   function continueFromLive() {
-    if (!liveTranscript.trim()) return;
-    setTranscript(liveTranscript);
+    const confirmedLiveTranscript = liveTranscriptRef.current || liveTranscript;
+    if (!confirmedLiveTranscript.trim()) {
+      setError("ट्रांसक्रिप्ट तैयार नहीं हुई। कृपया फिर से कोशिश करें।");
+      setLiveWarning(null);
+      return;
+    }
+    setTranscript(confirmedLiveTranscript);
+    setLiveWarning(null);
+    setLiveMode(false);
     setStatus("confirming");
   }
 
@@ -303,6 +315,7 @@ export default function Home() {
     liveActiveRef.current = false;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     stopMicMeter();
+    liveTranscriptRef.current = "";
     setAudio(null); setAudioUrl(""); setResult(null); setTranscript(""); setDetectedLanguage(""); setLiveMode(false); setLiveTranscript(""); setLiveWarning(null); setNoSpeech(false); setError(""); setStatus("idle"); setSeconds(0); setExpectedCall("none"); setSensitiveRequest("unsure"); setPressureUsed("unsure");
     if (fileRef.current) fileRef.current.value = "";
   }
